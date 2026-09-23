@@ -2,30 +2,27 @@ package com.mycompany.cateringmanagementsystem;
 
 import java.awt.*;
 import java.awt.event.*;
-import java.awt.image.BufferedImage;
 import java.io.*;
 import java.text.DecimalFormat;
 import java.text.SimpleDateFormat;
 import java.util.*;
 import java.util.List;
 import java.util.stream.Collectors;
-import javax.imageio.ImageIO;
 import javax.swing.*;
 import javax.swing.border.EmptyBorder;
 import javax.swing.plaf.basic.BasicTabbedPaneUI;
 import javax.swing.table.*;
 
 /**
- * Advanced Executive Catering Management System (V5 - Persistent Dish Selection & Guaranteed PDF Downloader)
- * Key Enhancements:
- * 1. Persistent Dish Selection Set: Changing Veg/Non-Veg/Category filters or typing in Search NEVER unchecks or resets previously selected dishes!
- * 2. Guaranteed PDF File Downloader: Generates clean, vector-rendered .pdf invoices with JFileChooser download prompt & automatic file opening!
- * 3. Non-Veg & Category Filtering: 100% of 300+ menu dishes fully visible & searchable.
- * 4. High-Contrast Dark Slate UI with 100% Component Visibility.
- * 5. Advance Deposit & Payment Balance Tracker.
- * 6. Event Add-on Services (Live Counters, Bar, Cutlery, Staff, Decor).
- * 7. Promo Code Engine (FESTIVE10, ROYAL15, WELCOME500).
- * 8. CSV Analytics Data Report Exporter.
+ * Advanced Executive Catering Management System (V6 - Dynamic PDF Sync on Payment/Status Updates)
+ * Key Highlights:
+ * 1. PDF Bill Auto-Update on Payment/Status Change: Whenever an order is updated, paid, or completed, the PDF bill automatically updates to show "Completed", "Fully Paid", and Balance Due = ₹0.00!
+ * 2. Record Payment / Pay Full Action: Direct button to settle remaining balance & auto-generate updated "PAID IN FULL" PDF invoice.
+ * 3. Persistent Dish Selection Set: Changing Veg/Non-Veg/Category filters or typing in Search NEVER unchecks or resets previously selected dishes!
+ * 4. Guaranteed PDF File Downloader: Generates clean PDF files with JFileChooser download prompt & auto-opening!
+ * 5. 300+ Delicacy Master Catalog (Veg, Non-Veg, Desserts, Beverages, Snacks).
+ * 6. High-Contrast Dark Slate UI with 100% Component Visibility.
+ * 7. CSV Analytics Data Report Exporter.
  */
 public class CateringManagementSystem extends JFrame {
     private static final long serialVersionUID = 1L;
@@ -60,8 +57,8 @@ public class CateringManagementSystem extends JFrame {
     public static final DecimalFormat CURRENCY_FORMAT = new DecimalFormat("₹#,##0.00");
 
     public CateringManagementSystem() {
-        setTitle("Catering Management System - Enterprise Edition (PDF Downloader & Persistent Selector)");
-        setSize(1250, 850);
+        setTitle("Catering Management System - Enterprise Edition (Live PDF Sync)");
+        setSize(1260, 860);
         setMinimumSize(new Dimension(1020, 700));
         setDefaultCloseOperation(JFrame.EXIT_ON_CLOSE);
         setLocationRelativeTo(null);
@@ -92,7 +89,7 @@ public class CateringManagementSystem extends JFrame {
         tabbedPane.setUI(new CustomTabUI());
 
         tabbedPane.addTab("  🛒 New Booking & 300+ Menu  ", orderPanel);
-        tabbedPane.addTab("  📋 Customer Orders & PDF Downloads  ", customerPanel);
+        tabbedPane.addTab("  📋 Customer Orders & Payment Settle  ", customerPanel);
         tabbedPane.addTab("  👨‍🍳 Menu Master  ", menuPanel);
         tabbedPane.addTab("  📊 Executive Analytics  ", analyticsPanel);
 
@@ -224,12 +221,35 @@ class Order implements Serializable {
         this.advancePaid = advancePaid;
         this.balanceDue = Math.max(0, totalPrice - advancePaid);
 
-        if (this.balanceDue <= 0) this.paymentStatus = "Fully Paid";
-        else if (this.advancePaid > 0) this.paymentStatus = "Deposit Paid";
-        else this.paymentStatus = "Unpaid";
+        updatePaymentStatus();
 
         this.status = status;
         this.timestamp = new SimpleDateFormat("yyyy-MM-dd HH:mm").format(new Date());
+    }
+
+    public void updatePayment(double additionalAmount) {
+        this.advancePaid += additionalAmount;
+        if (this.advancePaid > this.totalPrice) this.advancePaid = this.totalPrice;
+        this.balanceDue = Math.max(0, totalPrice - advancePaid);
+        updatePaymentStatus();
+    }
+
+    public void setFullyPaid() {
+        this.advancePaid = this.totalPrice;
+        this.balanceDue = 0.0;
+        this.paymentStatus = "Fully Paid";
+        this.status = "Completed";
+    }
+
+    private void updatePaymentStatus() {
+        if (this.balanceDue <= 0.01) {
+            this.balanceDue = 0.0;
+            this.paymentStatus = "Fully Paid";
+        } else if (this.advancePaid > 0) {
+            this.paymentStatus = "Deposit Paid";
+        } else {
+            this.paymentStatus = "Unpaid";
+        }
     }
 
     public String getOrderId() { return orderId; }
@@ -251,11 +271,16 @@ class Order implements Serializable {
     public double getBalanceDue() { return balanceDue; }
     public String getPaymentStatus() { return paymentStatus; }
     public String getStatus() { return status; }
-    public void setStatus(String s) { this.status = s; }
+    public void setStatus(String s) {
+        this.status = s;
+        if (s.equalsIgnoreCase("Completed")) {
+            setFullyPaid();
+        }
+    }
     public String getTimestamp() { return timestamp; }
 }
 
-// ==================== DATA MANAGER (300+ MENU GENERATOR) ==========================
+// ==================== DATA MANAGER ==========================
 
 class DataManager {
     private List<MenuItem> menuItems;
@@ -443,50 +468,47 @@ class DataManager {
 class InvoiceGenerator {
 
     /**
-     * Generates a PDF Document AND opens a Save File Dialog so the user can save the PDF anywhere!
+     * Regenerates & updates the PDF & HTML invoice files for an order, displaying updated Balance Due (₹0.00) & Status.
      */
-    public static File saveAndDownloadPdf(Component parent, Order order) {
+    public static File updateAndSyncPdfInvoice(Order order) {
         File dir = new File("invoices");
         if (!dir.exists()) dir.mkdirs();
 
-        File targetPdfFile = new File(dir, "Invoice_" + order.getOrderId() + ".pdf");
-        File targetHtmlFile = new File(dir, "Invoice_" + order.getOrderId() + ".html");
+        File pdfFile = new File(dir, "Invoice_" + order.getOrderId() + ".pdf");
+        File htmlFile = new File(dir, "Invoice_" + order.getOrderId() + ".html");
 
-        // 1. Generate HTML Invoice
-        generateHtmlInvoice(order, targetHtmlFile);
+        generateHtmlInvoice(order, htmlFile);
+        generatePdfFile(order, pdfFile);
 
-        // 2. Generate PDF File
-        generatePdfFile(order, targetPdfFile);
+        return pdfFile;
+    }
 
-        // 3. Open JFileChooser Save Dialog for user to download directly to Desktop or Downloads
+    public static File saveAndDownloadPdf(Component parent, Order order) {
+        File pdfFile = updateAndSyncPdfInvoice(order);
+
         JFileChooser chooser = new JFileChooser();
         chooser.setDialogTitle("💾 Save PDF Invoice As...");
         chooser.setSelectedFile(new File(System.getProperty("user.home") + "/Desktop/Invoice_" + order.getOrderId() + ".pdf"));
 
         int userSelection = chooser.showSaveDialog(parent);
-        File finalSavedFile = targetPdfFile;
+        File finalSavedFile = pdfFile;
 
         if (userSelection == JFileChooser.APPROVE_OPTION) {
             File chosenFile = chooser.getSelectedFile();
             if (!chosenFile.getName().endsWith(".pdf")) {
                 chosenFile = new File(chosenFile.getAbsolutePath() + ".pdf");
             }
-            copyFile(targetPdfFile, chosenFile);
+            copyFile(pdfFile, chosenFile);
             finalSavedFile = chosenFile;
         }
 
-        // 4. Force Windows system execution to auto-open PDF or HTML
         try {
             if (Desktop.isDesktopSupported()) {
                 Desktop.getDesktop().open(finalSavedFile);
             } else {
                 Runtime.getRuntime().exec("cmd /c start \"\" \"" + finalSavedFile.getAbsolutePath() + "\"");
             }
-        } catch (Exception ignored) {
-            try {
-                Runtime.getRuntime().exec("cmd /c start \"\" \"" + targetHtmlFile.getAbsolutePath() + "\"");
-            } catch (Exception ignored2) {}
-        }
+        } catch (Exception ignored) {}
 
         return finalSavedFile;
     }
@@ -529,6 +551,8 @@ class InvoiceGenerator {
             writer.println("(Event Date: " + cleanPdfText(order.getEventDate()) + "  |  Type: " + cleanPdfText(order.getEventType()) + ") Tj");
             writer.println("0 -16 Td");
             writer.println("(Guest Count: " + order.getGuestCount() + " Guests) Tj");
+            writer.println("0 -16 Td");
+            writer.println("(ORDER STATUS: " + cleanPdfText(order.getStatus()).toUpperCase() + "  |  PAYMENT: " + cleanPdfText(order.getPaymentStatus()).toUpperCase() + ") Tj");
             writer.println("0 -25 Td");
             writer.println("/F1 14 Tf");
             writer.println("(SELECTED MENU DELICACIES) Tj");
@@ -574,7 +598,14 @@ class InvoiceGenerator {
             writer.println("(GRAND TOTAL: Rs. " + String.format("%.2f", order.getTotalPrice()) + ") Tj");
             writer.println("0 -20 Td");
             writer.println("/F2 11 Tf");
-            writer.println("(Advance Paid: Rs. " + String.format("%.2f", order.getAdvancePaid()) + "   |   Balance Due: Rs. " + String.format("%.2f", order.getBalanceDue()) + ") Tj");
+            writer.println("(Total Paid: Rs. " + String.format("%.2f", order.getAdvancePaid()) + "   |   Balance Due: Rs. " + String.format("%.2f", order.getBalanceDue()) + ") Tj");
+
+            if (order.getBalanceDue() <= 0.01) {
+                writer.println("0 -22 Td");
+                writer.println("/F1 14 Tf");
+                writer.println("(*** PAID IN FULL - BALANCE DUE: Rs 0.00 ***) Tj");
+            }
+
             writer.println("0 -30 Td");
             writer.println("/F2 10 Tf");
             writer.println("(Thank you for choosing Executive Catering Services!) Tj");
@@ -662,6 +693,7 @@ class InvoiceGenerator {
         html.append("td { padding: 10px; border-bottom: 1px solid #334155; font-size: 13px; }");
         html.append(".total-box { background: #0f172a; padding: 20px; border-radius: 10px; margin-top: 25px; border-left: 5px solid #4ade80; border: 1px solid #475569; }");
         html.append(".grand-total { font-size: 24px; font-weight: bold; color: #4ade80; }");
+        html.append(".paid-badge { background: #16a34a; color: white; padding: 8px 16px; border-radius: 6px; font-size: 14px; font-weight: bold; display: inline-block; margin-top: 10px; }");
         html.append(".footer { margin-top: 30px; text-align: center; color: #94a3b8; font-size: 12px; }");
         html.append("</style></head><body>");
 
@@ -677,7 +709,7 @@ class InvoiceGenerator {
         html.append("<div><div class='label'>VENUE LOCATION</div><div class='val'>").append(order.getVenue()).append("</div></div>");
         html.append("<div><div class='label'>EVENT DATE & TYPE</div><div class='val'>").append(order.getEventDate()).append(" (").append(order.getEventType()).append(")</div></div>");
         html.append("<div><div class='label'>GUEST COUNT</div><div class='val'>").append(order.getGuestCount()).append(" Guests</div></div>");
-        html.append("<div><div class='label'>STATUS</div><div class='val'>").append(order.getStatus()).append("</div></div>");
+        html.append("<div><div class='label'>BOOKING STATUS</div><div class='val'>").append(order.getStatus()).append(" (").append(order.getPaymentStatus()).append(")</div></div>");
         html.append("</div></div>");
 
         html.append("<div class='section'><h3>Selected Menu Delicacies</h3><table>");
@@ -706,7 +738,12 @@ class InvoiceGenerator {
         html.append("<div>GST & Taxes (5%): <strong>").append(CateringManagementSystem.CURRENCY_FORMAT.format(order.getTaxAmount())).append("</strong></div>");
         html.append("<hr style='border-color:#334155; margin:10px 0;'>");
         html.append("<div class='grand-total'>GRAND TOTAL: ").append(CateringManagementSystem.CURRENCY_FORMAT.format(order.getTotalPrice())).append("</div>");
-        html.append("<div style='margin-top:10px;'>Advance Paid: <strong style='color:#60a5fa;'>").append(CateringManagementSystem.CURRENCY_FORMAT.format(order.getAdvancePaid())).append("</strong> | Balance Due: <strong style='color:#f87171;'>").append(CateringManagementSystem.CURRENCY_FORMAT.format(order.getBalanceDue())).append("</strong></div>");
+        html.append("<div style='margin-top:10px;'>Total Paid: <strong style='color:#60a5fa;'>").append(CateringManagementSystem.CURRENCY_FORMAT.format(order.getAdvancePaid())).append("</strong> | Balance Due: <strong style='color:#f87171;'>").append(CateringManagementSystem.CURRENCY_FORMAT.format(order.getBalanceDue())).append("</strong></div>");
+
+        if (order.getBalanceDue() <= 0.01) {
+            html.append("<div class='paid-badge'>✅ FULLY PAID - BALANCE DUE: ₹0.00</div>");
+        }
+
         html.append("</div>");
 
         html.append("<div class='footer'>Thank you for choosing our Executive Catering Services! | Contact: +91 98765 43210</div>");
@@ -767,7 +804,7 @@ class HeaderPanel extends JPanel {
         titleLabel.setFont(new Font("Segoe UI", Font.BOLD, 22));
         titleLabel.setForeground(CateringManagementSystem.TEXT_WHITE);
 
-        JLabel subtitleLabel = new JLabel("Executive Enterprise Platform - Persistent Selection & Direct PDF Downloader");
+        JLabel subtitleLabel = new JLabel("Executive Enterprise Platform - Live PDF Bill & Payment Sync Engine");
         subtitleLabel.setFont(new Font("Segoe UI", Font.PLAIN, 12));
         subtitleLabel.setForeground(CateringManagementSystem.TEXT_MUTED);
 
@@ -858,7 +895,6 @@ class OrderManagementPanel extends JPanel {
     private List<JCheckBox> itemCheckBoxes;
     private Map<JCheckBox, MenuItem> checkBoxMap;
 
-    // PERSISTENT SELECTION SET (Dishes stay selected when changing filters/search!)
     private Set<String> selectedDishNames;
 
     private List<JCheckBox> addOnCheckBoxes;
@@ -1027,7 +1063,7 @@ class OrderManagementPanel extends JPanel {
         selectedCounterLabel.setForeground(CateringManagementSystem.TEXT_YELLOW);
 
         menuScroll.setBorder(BorderFactory.createTitledBorder(
-                BorderFactory.createLineBorder(CateringManagementSystem.BORDER_COLOR), "Culinary Items (Selection Preserved Across Filters)",
+                BorderFactory.createLineBorder(CateringManagementSystem.BORDER_COLOR), "Culinary Items",
                 0, 0, new Font("Segoe UI", Font.BOLD, 11), CateringManagementSystem.ACCENT_BLUE_BORDER));
         menuScroll.getViewport().setBackground(CateringManagementSystem.PANEL_BG);
         menuScroll.getVerticalScrollBar().setUnitIncrement(16);
@@ -1104,12 +1140,10 @@ class OrderManagementPanel extends JPanel {
                 cb.setForeground(CateringManagementSystem.TEXT_WHITE);
                 cb.setOpaque(false);
 
-                // RESTORE CHECKED STATE FROM PERSISTENT SET
                 if (selectedDishNames.contains(item.getName())) {
                     cb.setSelected(true);
                 }
 
-                // LISTEN & KEEP PERSISTENT SET UPDATED
                 cb.addActionListener(e -> {
                     if (cb.isSelected()) {
                         selectedDishNames.add(item.getName());
@@ -1256,7 +1290,6 @@ class OrderManagementPanel extends JPanel {
 
         double perPlateCost = 0.0;
 
-        // CALCULATE ACROSS ENTIRE PERSISTENT SELECTION SET
         Map<String, MenuItem> allMenuMap = dataManager.getMenuItems().stream()
                 .collect(Collectors.toMap(MenuItem::getName, m -> m, (a, b) -> a));
 
@@ -1355,7 +1388,6 @@ class OrderManagementPanel extends JPanel {
 
         dataManager.addOrder(newOrder);
 
-        // Open JFileChooser Save PDF Dialog & Save/Open PDF
         File pdfFile = InvoiceGenerator.saveAndDownloadPdf(this, newOrder);
 
         JOptionPane.showMessageDialog(this,
@@ -1539,16 +1571,19 @@ class CustomerManagementPanel extends JPanel {
         JPanel actionBar = new JPanel(new FlowLayout(FlowLayout.RIGHT, 10, 0));
         actionBar.setOpaque(false);
 
-        JButton downloadPdfBtn = new PrimaryButton("💾 Download PDF Invoice");
+        JButton payBalanceBtn = new PrimaryButton("💳 Pay Full / Settle Balance");
+        JButton downloadPdfBtn = new SecondaryButton("💾 Download PDF Invoice");
         JButton statusBtn = new SecondaryButton("⚡ Update Status");
         JButton exportCsvBtn = new SecondaryButton("📊 Export CSV");
         JButton deleteBtn = new DangerButton("🗑️ Delete Booking");
 
+        payBalanceBtn.addActionListener(e -> payFullBalanceForSelected());
         downloadPdfBtn.addActionListener(e -> downloadPdfForSelected());
         statusBtn.addActionListener(e -> changeSelectedOrderStatus());
         exportCsvBtn.addActionListener(e -> InvoiceGenerator.exportCsvReport(dataManager.getOrders()));
         deleteBtn.addActionListener(e -> deleteSelectedOrder());
 
+        actionBar.add(payBalanceBtn);
         actionBar.add(downloadPdfBtn);
         actionBar.add(statusBtn);
         actionBar.add(exportCsvBtn);
@@ -1602,11 +1637,46 @@ class CustomerManagementPanel extends JPanel {
                 .findFirst().orElse(null);
     }
 
+    private void payFullBalanceForSelected() {
+        Order order = getSelectedOrderObj();
+        if (order == null) return;
+
+        if (order.getBalanceDue() <= 0.01) {
+            JOptionPane.showMessageDialog(this, "This order is already FULLY PAID! Balance Due is ₹0.00.", "Payment Completed", JOptionPane.INFORMATION_MESSAGE);
+            return;
+        }
+
+        int confirm = JOptionPane.showConfirmDialog(this,
+                "Settle remaining balance for " + order.getOrderId() + " (" + order.getCustomerName() + ")?\n" +
+                "Current Balance Due: " + CateringManagementSystem.CURRENCY_FORMAT.format(order.getBalanceDue()) + "\n\n" +
+                "Click YES to record full payment, update status to COMPLETED, and regenerate PDF invoice.",
+                "Settle Full Payment", JOptionPane.YES_NO_OPTION, JOptionPane.QUESTION_MESSAGE);
+
+        if (confirm == JOptionPane.YES_OPTION) {
+            order.setFullyPaid();
+            dataManager.saveData();
+
+            // DYNAMICALLY REGENERATE & SYNC UPDATED PDF BILL WITH BALANCE DUE = 0
+            File pdfFile = InvoiceGenerator.saveAndDownloadPdf(this, order);
+
+            mainFrame.refreshAllPanels();
+
+            JOptionPane.showMessageDialog(this,
+                    "🎉 Payment Succeeded! Order is now FULLY PAID.\n" +
+                    "Status: Completed\n" +
+                    "Balance Due: ₹0.00\n\n" +
+                    "📄 Updated PDF Invoice Generated & Saved:\n" + pdfFile.getAbsolutePath(),
+                    "Order Paid & PDF Updated", JOptionPane.INFORMATION_MESSAGE);
+        }
+    }
+
     private void downloadPdfForSelected() {
         Order order = getSelectedOrderObj();
         if (order == null) return;
+
+        // Auto Sync & Download Updated PDF
         File file = InvoiceGenerator.saveAndDownloadPdf(this, order);
-        JOptionPane.showMessageDialog(this, "📄 PDF Invoice Saved & Opened:\n" + file.getAbsolutePath(), "PDF Invoice Downloaded", JOptionPane.INFORMATION_MESSAGE);
+        JOptionPane.showMessageDialog(this, "📄 PDF Invoice Downloaded & Opened:\n" + file.getAbsolutePath(), "PDF Invoice Saved", JOptionPane.INFORMATION_MESSAGE);
     }
 
     private void changeSelectedOrderStatus() {
@@ -1620,8 +1690,13 @@ class CustomerManagementPanel extends JPanel {
 
         if (newStatus != null && !newStatus.equals(order.getStatus())) {
             order.setStatus(newStatus);
+
+            // AUTO-REGENERATE PDF BILL WITH NEW STATUS & BALANCES
+            InvoiceGenerator.updateAndSyncPdfInvoice(order);
+
             dataManager.saveData();
             mainFrame.refreshAllPanels();
+            JOptionPane.showMessageDialog(this, "Status updated to " + newStatus + "! Updated PDF bill regenerated.", "Status Updated", JOptionPane.INFORMATION_MESSAGE);
         }
     }
 
