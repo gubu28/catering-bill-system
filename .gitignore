@@ -1,0 +1,8 @@
+target/
+.idea/
+*.iml
+*.class
+catering_data.dat
+invoices/
+reports/
+orders.txt
